@@ -1,23 +1,30 @@
-[tool.poetry]
+[project]
 name = "tileget"
-version = "0.3.1"
+version = "0.4.0"
 description = "Tile download utility - easily download xyz-tile data"
-authors = ["Kanahiro <mediterranean1769@gmail.com>"]
-license = "MIT"
 readme = "README.md"
+requires-python = ">= 3.10"
+dependencies = [
+  "shapely>=2.0.3",
+  "tiletanic>=1.1.0",
+  "pyproj>=3.6.1"
+]
 
-[tool.poetry.dependencies]
-python = "^3.10"
-shapely = "^2.0.3"
-tiletanic = "^1.1.0"
-pyproj = "^3.6.1"
-
-[tool.poetry.group.dev.dependencies]
-ruff = "^0.3.0"
+[project.scripts]
+tileget = "tileget.__main__:main"
 
 [build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
-[tool.poetry.scripts]
-tileget = "tileget.__main__:main"
+[tool.rye]
+managed = true
+dev-dependencies = [
+    "ruff>=0.3.7",
+]
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["tileget"]
