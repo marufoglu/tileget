@@ -63,23 +63,27 @@ def create_mbtiles(output_file: str):
 
 
 def download_dir(
-    tile, tileurl: str, output_path: str, timeout: int = 5000, overwrite: bool = False
+    tile: tiletanic.Tile,
+    tileurl: str,
+    output_path: str,
+    timeout: int = 5000,
+    overwrite: bool = False,
 ):
     # detect file extension from tileurl
     # tileurl = https://path/to/{z}/{x}/{y}.ext?foo=bar...&hoge=fuga.json
     ext = os.path.splitext(tileurl.split("?")[0])[-1]
 
-    write_dir = os.path.join(output_path, str(tile[2]), str(tile[0]))
-    write_filepath = os.path.join(write_dir, str(tile[1]) + ext)
+    write_dir = os.path.join(output_path, str(tile.z), str(tile.x))
+    write_filepath = os.path.join(write_dir, str(tile.y) + ext)
 
     if os.path.exists(write_filepath) and not overwrite:
         # skip if already exists when not-overwrite mode
         return
 
     url = (
-        tileurl.replace(r"{x}", str(tile[0]))
-        .replace(r"{y}", str(tile[1]))
-        .replace(r"{z}", str(tile[2]))
+        tileurl.replace(r"{x}", str(tile.x))
+        .replace(r"{y}", str(tile.y))
+        .replace(r"{z}", str(tile.z))
     )
 
     try:
@@ -95,26 +99,30 @@ def download_dir(
 
 def download_mbtiles(
     conn: sqlite3.Connection,
-    tile,
+    tile: tiletanic.Tile,
     tileurl: str,
     timeout: int = 5000,
     overwrite: bool = False,
+    tms: bool = False,
 ):
-    # flip y: xyz -> tms
-    ty = (1 << tile[2]) - 1 - tile[1]
+    if tms:
+        ty = tile.y
+    else:
+        # flip y: xyz -> tms
+        ty = (1 << tile.z) - 1 - tile.y
 
     c = conn.cursor()
     c.execute(
         "SELECT tile_data FROM tiles WHERE zoom_level = ? AND tile_column = ? AND tile_row = ?",
-        (tile[2], tile[0], ty),
+        (tile.z, tile.x, ty),
     )
     if c.fetchone() is not None and not overwrite:
         return
 
     url = (
-        tileurl.replace(r"{x}", str(tile[0]))
-        .replace(r"{y}", str(tile[1]))
-        .replace(r"{z}", str(tile[2]))
+        tileurl.replace(r"{x}", str(tile.x))
+        .replace(r"{y}", str(tile.y))
+        .replace(r"{z}", str(tile.z))
     )
     try:
         data = fetch_data(url, timeout)
@@ -125,12 +133,12 @@ def download_mbtiles(
     if overwrite:
         c.execute(
             "DELETE FROM tiles WHERE zoom_level = ? AND tile_column = ? AND tile_row = ?",
-            (tile[2], tile[0], ty),
+            (tile.z, tile.x, ty),
         )
 
     c.execute(
         "INSERT INTO tiles (zoom_level, tile_column, tile_row, tile_data) VALUES (?, ?, ?, ?)",
-        (tile[2], tile[0], ty, data),
+        (tile.z, tile.x, ty, data),
     )
     conn.commit()
 
@@ -157,7 +165,7 @@ def main():
 
         def _download(tile):
             download_mbtiles(
-                conn, tile, params.tileurl, params.timeout, params.overwrite
+                conn, tile, params.tileurl, params.timeout, params.overwrite, params.tms
             )
             time.sleep(params.interval / 1000)
 
