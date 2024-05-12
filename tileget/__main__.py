@@ -1,162 +1,178 @@
 import os
-import argparse
+import sqlite3
 import time
 import urllib.request
-import json
-from concurrent.futures import ThreadPoolExecutor
 
 import tiletanic
-import shapely
-from pyproj import Transformer
+
+from tileget.arg import parse_arg
 
 
-def get_args():
-    parser = argparse.ArgumentParser(description="xyz-tile download tool")
-    parser.add_argument("tileurl", help=r"xyz-tile url in {z}/{x}/{y} template")
-    parser.add_argument("output_dir", help="output dir")
-    parser.add_argument(
-        "--extent",
-        help="min_lon min_lat max_lon max_lat, whitespace delimited",
-        nargs=4,
+def fetch_data(url: str, timeout: int = 5000) -> bytes:
+    print("downloading: " + url)
+    data = None
+    while True:
+        try:
+            data = urllib.request.urlopen(url, timeout=timeout / 1000)
+            break
+        except urllib.error.HTTPError as e:
+            raise Exception(str(e) + ":" + url)
+        except Exception as e:
+            if (
+                str(e.args)
+                == "(timeout('_ssl.c:1091: The handshake operation timed out'),)"
+            ):
+                print("timeout, retrying... :" + url)
+            else:
+                raise Exception(str(e) + ":" + url)
+
+    return data.read()
+
+
+def create_mbtiles(output_file: str):
+    conn = sqlite3.connect(output_file)
+    c = conn.cursor()
+    c.execute(
+        """
+        CREATE TABLE metadata (
+            name TEXT,
+            value TEXT
+        )
+        """
     )
-    parser.add_argument(
-        "--geojson",
-        help="path to geojson file of Feature or FeatureCollection",
+    c.execute(
+        """
+        CREATE TABLE tiles (
+            zoom_level INTEGER,
+            tile_column INTEGER,
+            tile_row INTEGER,
+            tile_data BLOB
+        )
+        """
     )
-    parser.add_argument("--minzoom", default="0", help="default to 0")
-    parser.add_argument("--maxzoom", default="16", help="default to 16")
-    parser.add_argument(
-        "--interval",
-        default="500",
-        help="time taken after each-request, set as miliseconds in interger, default to 500",
+    c.execute(
+        """
+        CREATE UNIQUE INDEX tile_index
+        ON tiles (zoom_level, tile_column, tile_row)
+        """
     )
-    parser.add_argument(
-        "--overwrite", help="overwrite existing files", action="store_true"
+    conn.commit()
+    conn.close()
+
+    return output_file
+
+
+def download_dir(
+    tile, tileurl: str, output_path: str, timeout: int = 5000, overwrite: bool = False
+):
+    # detect file extension from tileurl
+    # tileurl = https://path/to/{z}/{x}/{y}.ext?foo=bar...&hoge=fuga.json
+    ext = os.path.splitext(tileurl.split("?")[0])[-1]
+
+    write_dir = os.path.join(output_path, str(tile[2]), str(tile[0]))
+    write_filepath = os.path.join(write_dir, str(tile[1]) + ext)
+
+    if os.path.exists(write_filepath) and not overwrite:
+        # skip if already exists when not-overwrite mode
+        return
+
+    url = (
+        tileurl.replace(r"{x}", str(tile[0]))
+        .replace(r"{y}", str(tile[1]))
+        .replace(r"{z}", str(tile[2]))
     )
-    parser.add_argument(
-        "--timeout",
-        default="5",
-        help="wait response until this value, set as seconds in integer, default to 5",
+
+    try:
+        data = fetch_data(url, timeout)
+    except Exception as e:
+        print(e)
+        return
+
+    os.makedirs(write_dir, exist_ok=True)
+    with open(write_filepath, mode="wb") as f:
+        f.write(data)
+
+
+def download_mbtiles(
+    conn: sqlite3.Connection,
+    tile,
+    tileurl: str,
+    timeout: int = 5000,
+    overwrite: bool = False,
+):
+    # flip y: xyz -> tms
+    ty = (1 << tile[2]) - 1 - tile[1]
+
+    c = conn.cursor()
+    c.execute(
+        "SELECT tile_data FROM tiles WHERE zoom_level = ? AND tile_column = ? AND tile_row = ?",
+        (tile[2], tile[0], ty),
     )
-    parser.add_argument("--parallel", default="1", help="num of parallel requests")
-    parser.add_argument("--tms", help="if set, parse z/x/y as TMS", action="store_true")
-    args = parser.parse_args()
+    if c.fetchone() is not None and not overwrite:
+        return
 
-    verified_args = {
-        "tileurl": args.tileurl,
-        "output_dir": args.output_dir,
-        "extent": None,
-        "geojson": None,
-        "minzoom": int(args.minzoom),
-        "maxzoom": int(args.maxzoom),
-        "interval": int(args.interval),
-        "overwrite": args.overwrite,
-        "timeout": int(args.timeout),
-        "parallel": int(args.parallel),
-        "tms": args.tms,
-    }
+    url = (
+        tileurl.replace(r"{x}", str(tile[0]))
+        .replace(r"{y}", str(tile[1]))
+        .replace(r"{z}", str(tile[2]))
+    )
+    try:
+        data = fetch_data(url, timeout)
+    except Exception as e:
+        print(e)
+        return
 
-    if args.extent is None and args.geojson is None:
-        raise Exception("extent or geojson must be input")
+    if overwrite:
+        c.execute(
+            "DELETE FROM tiles WHERE zoom_level = ? AND tile_column = ? AND tile_row = ?",
+            (tile[2], tile[0], ty),
+        )
 
-    if args.extent is not None:
-        verified_args["extent"] = tuple(map(float, args.extent))
-
-    if args.geojson is not None:
-        verified_args["geojson"] = args.geojson
-
-    return verified_args
+    c.execute(
+        "INSERT INTO tiles (zoom_level, tile_column, tile_row, tile_data) VALUES (?, ?, ?, ?)",
+        (tile[2], tile[0], ty, data),
+    )
+    conn.commit()
 
 
 def main():
-    args = get_args()
+    params = parse_arg()
 
-    if args["extent"] is not None:
-        geometry = shapely.geometry.shape(
-            {
-                "type": "Polygon",
-                "coordinates": [
-                    [
-                        (args["extent"][0], args["extent"][1]),
-                        (args["extent"][2], args["extent"][1]),
-                        (args["extent"][2], args["extent"][3]),
-                        (args["extent"][0], args["extent"][3]),
-                        (args["extent"][0], args["extent"][1]),
-                    ],
-                ],
-            }
-        )
-    elif args["geojson"] is not None:
-        with open(args["geojson"], mode="r") as f:
-            geojson = json.load(f)
-        if geojson.get("features") is None:
-            geometry = shapely.geometry.shape(geojson["geometry"])
-        else:
-            geometries = [
-                shapely.geometry.shape(g)
-                for g in list(map(lambda f: f["geometry"], geojson["features"]))
-            ]
-            geometry = shapely.ops.unary_union(geometries)
+    if params.mode == "dir":
 
-    # tiletanic accept only EPSG:3857 shape, convert
-    transformer = Transformer.from_crs(4326, 3857, always_xy=True)
-    geom_3857 = shapely.ops.transform(transformer.transform, geometry)
+        def _download(tile):
+            download_dir(
+                tile,
+                params.tileurl,
+                params.output_path,
+                params.timeout,
+                params.overwrite,
+            )
+            time.sleep(params.interval / 1000)
+    elif params.mode == "mbtiles":
+        if not os.path.exists(params.output_path):
+            create_mbtiles(params.output_path)
 
-    def download(tile):
-        # detect file extension from tileurl
-        # tileurl = https://path/to/{z}/{x}/{y}.ext?foo=bar...&hoge=fuga.json
-        ext = os.path.splitext(args["tileurl"].split("?")[0])[-1]
+        conn = sqlite3.connect(params.output_path)
 
-        write_dir = os.path.join(args["output_dir"], str(tile[2]), str(tile[0]))
-        write_filepath = os.path.join(write_dir, str(tile[1]) + ext)
-
-        if os.path.exists(write_filepath) and not args["overwrite"]:
-            # skip if already exists when not-overwrite mode
-            return
-
-        url = (
-            args["tileurl"]
-            .replace(r"{x}", str(tile[0]))
-            .replace(r"{y}", str(tile[1]))
-            .replace(r"{z}", str(tile[2]))
-        )
-        print("downloading: " + url)
-
-        data = None
-        while True:
-            try:
-                data = urllib.request.urlopen(url, timeout=args["timeout"])
-                break
-            except urllib.error.HTTPError as e:
-                raise Exception(str(e) + ":" + url)
-            except Exception as e:
-                if (
-                    str(e.args)
-                    == "(timeout('_ssl.c:1091: The handshake operation timed out'),)"
-                ):
-                    print("timeout, retrying... :" + url)
-                else:
-                    raise Exception(str(e) + ":" + url)
-
-        if data is not None:
-            os.makedirs(write_dir, exist_ok=True)
-            with open(write_filepath, mode="wb") as f:
-                f.write(data.read())
-            time.sleep(args["interval"] / 1000)
+        def _download(tile):
+            download_mbtiles(
+                conn, tile, params.tileurl, params.timeout, params.overwrite
+            )
+            time.sleep(params.interval / 1000)
 
     tilescheme = (
         tiletanic.tileschemes.WebMercatorBL()
-        if args["tms"]
+        if params.tms
         else tiletanic.tileschemes.WebMercator()
     )
 
-    with ThreadPoolExecutor(max_workers=args["parallel"]) as executor:
-        for zoom in range(args["minzoom"], args["maxzoom"] + 1):
-            generator = tiletanic.tilecover.cover_geometry(tilescheme, geom_3857, zoom)
-            for tile in generator:
-                future = executor.submit(download, tile)
-                if future.exception() is not None:
-                    print(future.exception())
+    for zoom in range(params.minzoom, params.maxzoom + 1):
+        generator = tiletanic.tilecover.cover_geometry(
+            tilescheme, params.geometry, zoom
+        )
+        for tile in generator:
+            _download(tile)
 
     print("finished")
 
