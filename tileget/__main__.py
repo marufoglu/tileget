@@ -173,7 +173,7 @@ def main():
             "INSERT INTO metadata (name, value) VALUES (?, ?)",
             (
                 "format",
-                os.path.splitext(params.tileurl.split("?"))[-1].replace(".", ""),
+                os.path.splitext(params.tileurl.split("?")[0])[-1].replace(".", ""),
             ),
         )
         c.execute(
