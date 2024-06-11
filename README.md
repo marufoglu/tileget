@@ -10,7 +10,7 @@ pip install tileget
 
 ## usage
 
-```
+```planetext
 usage: __main__.py [-h] [-e OUTPUT_DIR] [-o OUTPUT_FILE] [--extent EXTENT EXTENT EXTENT EXTENT] [--geojson GEOJSON] [--minzoom MINZOOM] [--maxzoom MAXZOOM] [--interval INTERVAL] [--overwrite] [--timeout TIMEOUT] [--tms]
                    tileurl
 
@@ -39,6 +39,10 @@ options:
 ### examples
 
 ```sh
-tileget https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg -e ./output_dir --extent 141.23 40.56 142.45 43.78 --maxzoom 12
-tileget https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg -o ./output.mbtiles
+# basic usage
+tileget http://path/to/tile/{z}/{x}/{y}.jpg -e output_dir --extent 141.23 40.56 142.45 43.78
+tileget http://path/to/tile/{z}/{x}/{y}.jpg -o output.mbtiles --geojson input.geojson
+
+# optional arguments
+tileget http://path/to/tile/{z}/{x}/{y}.jpg -e output_dir --extent 141.23 40.56 142.45 43.78 --minzoom 0 --maxzoom 16 --interval 500 --timeout 5000 --overwrite
 ```
