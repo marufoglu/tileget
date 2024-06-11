@@ -163,6 +163,30 @@ def main():
 
         conn = sqlite3.connect(params.output_path)
 
+        # write metadata
+        c = conn.cursor()
+        c.execute(
+            "INSERT INTO metadata (name, value) VALUES (?, ?)",
+            ("name", os.path.basename(params.output_path)),
+        )
+        c.execute(
+            "INSERT INTO metadata (name, value) VALUES (?, ?)",
+            (
+                "format",
+                os.path.splitext(params.tileurl.split("?")[0])[-1].replace(".", ""),
+            ),
+        )
+        c.execute(
+            "INSERT INTO metadata (name, value) VALUES (?, ?)",
+            ("minzoom", params.minzoom),
+        )
+        c.execute(
+            "INSERT INTO metadata (name, value) VALUES (?, ?)",
+            ("maxzoom", params.maxzoom),
+        )
+
+        conn.commit()
+
         def _download(tile):
             download_mbtiles(
                 conn, tile, params.tileurl, params.timeout, params.overwrite, params.tms
