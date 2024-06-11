@@ -1,5 +1,8 @@
 # tileget
 
+![GitHub Release](https://img.shields.io/github/v/release/Kanahiro/tileget?label=PyPI)
+![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/Kanahiro/tileget/lint.yml?label=lint)
+
 Tile download utility - easily download xyz-tile data.
 
 ## installation
