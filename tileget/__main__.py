@@ -1,6 +1,7 @@
 import asyncio
 import os
 import random
+import signal
 import sqlite3
 import time
 
@@ -13,6 +14,9 @@ from tileget.arg import parse_arg
 downloaded_count = 0
 start_time = 0.0
 
+# グレースフルシャットダウン用フラグ
+shutdown_requested = False
+
 
 class RateLimiter:
     def __init__(self, rps: int):
@@ -21,13 +25,24 @@ class RateLimiter:
         self.last_request_time = 0.0
         self.lock = asyncio.Lock()
 
-    async def acquire(self):
+    async def acquire(self) -> bool:
+        """レートリミットを取得。シャットダウン時はFalseを返す"""
+        if shutdown_requested:
+            return False
+
         async with self.lock:
+            if shutdown_requested:
+                return False
+
             now = time.monotonic()
             wait_time = self.last_request_time + self.interval - now
             if wait_time > 0:
                 await asyncio.sleep(wait_time)
+                if shutdown_requested:
+                    return False
+
             self.last_request_time = time.monotonic()
+            return True
 
 
 def is_retryable_error(e: Exception) -> bool:
@@ -69,6 +84,8 @@ async def fetch_data(
             delay = retry_delay * (2**attempt) + random.uniform(0, 1)
             print(f"retry {attempt + 1}/{retries} after {delay:.1f}s: {url}")
             await asyncio.sleep(delay)
+            if shutdown_requested:
+                return None
 
     return None
 
@@ -92,7 +109,9 @@ async def download_dir(
     if os.path.exists(write_filepath) and not overwrite:
         return
 
-    await rate_limiter.acquire()
+    if not await rate_limiter.acquire():
+        return
+
     url = (
         tileurl.replace(r"{x}", str(tile.x))
         .replace(r"{y}", str(tile.y))
@@ -133,7 +152,9 @@ async def download_mbtiles(
     if c.fetchone() is not None and not overwrite:
         return
 
-    await rate_limiter.acquire()
+    if not await rate_limiter.acquire():
+        return
+
     url = (
         tileurl.replace(r"{x}", str(tile.x))
         .replace(r"{y}", str(tile.y))
@@ -191,9 +212,21 @@ def create_mbtiles(output_file: str):
 
 
 async def run():
-    global start_time
+    global start_time, shutdown_requested
     params = parse_arg()
     start_time = time.monotonic()
+
+    # SIGINTハンドラを設定
+    loop = asyncio.get_running_loop()
+
+    def handle_sigint():
+        global shutdown_requested
+        if not shutdown_requested:
+            shutdown_requested = True
+            print("\nShutdown requested. Waiting for running tasks to complete...")
+
+    loop.add_signal_handler(signal.SIGINT, handle_sigint)
+    loop.add_signal_handler(signal.SIGTERM, handle_sigint)
 
     rate_limiter = RateLimiter(params.rps)
 
@@ -234,47 +267,64 @@ async def run():
 
     async with httpx.AsyncClient() as client:
         for zoom in range(params.minzoom, params.maxzoom + 1):
+            if shutdown_requested:
+                break
+
             tiles = tiletanic.tilecover.cover_geometry(
                 tilescheme, params.geometry, zoom
             )
 
-            async with asyncio.TaskGroup() as tg:
-                for tile in tiles:
-                    if params.mode == "dir":
-                        tg.create_task(
-                            download_dir(
-                                client,
-                                rate_limiter,
-                                tile,
-                                params.tileurl,
-                                params.output_path,
-                                params.timeout,
-                                params.overwrite,
-                                params.retries,
-                                params.retry_delay,
-                            )
+            # TaskGroupの代わりに手動でタスクを管理
+            pending_tasks: set[asyncio.Task] = set()
+
+            for tile in tiles:
+                if shutdown_requested:
+                    break
+
+                if params.mode == "dir":
+                    task = asyncio.create_task(
+                        download_dir(
+                            client,
+                            rate_limiter,
+                            tile,
+                            params.tileurl,
+                            params.output_path,
+                            params.timeout,
+                            params.overwrite,
+                            params.retries,
+                            params.retry_delay,
                         )
-                    else:
-                        assert conn is not None
-                        tg.create_task(
-                            download_mbtiles(
-                                client,
-                                rate_limiter,
-                                conn,
-                                tile,
-                                params.tileurl,
-                                params.timeout,
-                                params.overwrite,
-                                params.tms,
-                                params.retries,
-                                params.retry_delay,
-                            )
+                    )
+                else:
+                    assert conn is not None
+                    task = asyncio.create_task(
+                        download_mbtiles(
+                            client,
+                            rate_limiter,
+                            conn,
+                            tile,
+                            params.tileurl,
+                            params.timeout,
+                            params.overwrite,
+                            params.tms,
+                            params.retries,
+                            params.retry_delay,
                         )
+                    )
+                pending_tasks.add(task)
+                task.add_done_callback(pending_tasks.discard)
+
+            # 残っているタスクの完了を待つ
+            if pending_tasks:
+                await asyncio.gather(*pending_tasks, return_exceptions=True)
 
     if conn is not None:
         conn.close()
 
-    print("finished")
+    if shutdown_requested:
+        print("Shutdown complete.")
+    else:
+        print("finished")
 
 
 def main():
