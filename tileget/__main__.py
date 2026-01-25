@@ -228,33 +228,38 @@ async def run():
                 tilescheme, params.geometry, zoom
             )
 
-            for tile in tiles:
-                if params.mode == "dir":
-                    await download_dir(
-                        client,
-                        rate_limiter,
-                        tile,
-                        params.tileurl,
-                        params.output_path,
-                        params.timeout,
-                        params.overwrite,
-                        params.retries,
-                        params.retry_delay,
-                    )
-                else:
-                    assert conn is not None
-                    await download_mbtiles(
-                        client,
-                        rate_limiter,
-                        conn,
-                        tile,
-                        params.tileurl,
-                        params.timeout,
-                        params.overwrite,
-                        params.tms,
-                        params.retries,
-                        params.retry_delay,
-                    )
+            async with asyncio.TaskGroup() as tg:
+                for tile in tiles:
+                    if params.mode == "dir":
+                        tg.create_task(
+                            download_dir(
+                                client,
+                                rate_limiter,
+                                tile,
+                                params.tileurl,
+                                params.output_path,
+                                params.timeout,
+                                params.overwrite,
+                                params.retries,
+                                params.retry_delay,
+                            )
+                        )
+                    else:
+                        assert conn is not None
+                        tg.create_task(
+                            download_mbtiles(
+                                client,
+                                rate_limiter,
+                                conn,
+                                tile,
+                                params.tileurl,
+                                params.timeout,
+                                params.overwrite,
+                                params.tms,
+                                params.retries,
+                                params.retry_delay,
+                            )
+                        )
 
     if conn is not None:
         conn.close()
