@@ -13,14 +13,14 @@ class RunParams:
     mode: Literal["dir", "mbtiles"]
     output_path: str
     geometry: shapely.geometry.base.BaseGeometry
-    minzoom: int = 0
-    maxzoom: int = 16
-    rps: int = 1
-    overwrite: bool = False
-    timeout: int = 5000
-    tms: bool = False
-    retries: int = 3
-    retry_delay: float = 1.0
+    minzoom: int
+    maxzoom: int
+    rps: int
+    overwrite: bool
+    timeout: int
+    tms: bool
+    retries: int
+    retry_delay: float
 
 
 def parse_arg() -> RunParams:

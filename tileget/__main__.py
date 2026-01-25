@@ -37,9 +37,9 @@ def is_retryable_error(e: Exception) -> bool:
 async def fetch_data(
     client: httpx.AsyncClient,
     url: str,
-    timeout: int = 5000,
-    retries: int = 3,
-    retry_delay: float = 1.0,
+    timeout: int,
+    retries: int,
+    retry_delay: float,
 ) -> bytes | None:
     print("downloading: " + url)
 
@@ -71,10 +71,10 @@ async def download_dir(
     tile: tiletanic.Tile,
     tileurl: str,
     output_path: str,
-    timeout: int = 5000,
-    overwrite: bool = False,
-    retries: int = 3,
-    retry_delay: float = 1.0,
+    timeout: int,
+    overwrite: bool,
+    retries: int,
+    retry_delay: float,
 ):
     ext = os.path.splitext(tileurl.split("?")[0])[-1]
 
@@ -106,11 +106,11 @@ async def download_mbtiles(
     conn: sqlite3.Connection,
     tile: tiletanic.Tile,
     tileurl: str,
-    timeout: int = 5000,
-    overwrite: bool = False,
-    tms: bool = False,
-    retries: int = 3,
-    retry_delay: float = 1.0,
+    timeout: int,
+    overwrite: bool,
+    tms: bool,
+    retries: int,
+    retry_delay: float,
 ):
     if tms:
         ty = tile.y
