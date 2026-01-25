@@ -40,6 +40,7 @@ def parse_arg() -> RunParams:
     )
     parser.add_argument("--minzoom", default=0, type=int, help="default to 0")
     parser.add_argument("--maxzoom", default=16, type=int, help="default to 16")
+
     def positive_int(value: str) -> int:
         ivalue = int(value)
         if ivalue <= 0:
