@@ -15,7 +15,7 @@ class RunParams:
     geometry: shapely.geometry.base.BaseGeometry
     minzoom: int = 0
     maxzoom: int = 16
-    interval: int = 1000
+    rps: int = 2
     overwrite: bool = False
     timeout: int = 5000
     tms: bool = False
@@ -38,10 +38,10 @@ def parse_arg() -> RunParams:
     parser.add_argument("--minzoom", default=0, type=int, help="default to 0")
     parser.add_argument("--maxzoom", default=16, type=int, help="default to 16")
     parser.add_argument(
-        "--interval",
-        default=500,
+        "--rps",
+        default=2,
         type=int,
-        help="time taken after each-request, set as miliseconds in interger, default to 500",
+        help="requests per second, default to 2",
     )
     parser.add_argument(
         "--overwrite", help="overwrite existing files", action="store_true"
@@ -105,7 +105,7 @@ def parse_arg() -> RunParams:
         geometry=geom_3857,
         minzoom=args.minzoom,
         maxzoom=args.maxzoom,
-        interval=args.interval,
+        rps=args.rps,
         overwrite=args.overwrite,
         timeout=args.timeout,
         tms=args.tms,

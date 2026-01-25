@@ -1,11 +1,28 @@
 import asyncio
 import os
 import sqlite3
+import time
 
 import httpx
 import tiletanic
 
 from tileget.arg import parse_arg
+
+
+class RateLimiter:
+    def __init__(self, rps: int):
+        self.rps = rps
+        self.interval = 1.0 / rps
+        self.last_request_time = 0.0
+        self.lock = asyncio.Lock()
+
+    async def acquire(self):
+        async with self.lock:
+            now = time.monotonic()
+            wait_time = self.last_request_time + self.interval - now
+            if wait_time > 0:
+                await asyncio.sleep(wait_time)
+            self.last_request_time = time.monotonic()
 
 
 async def fetch_data(
@@ -29,40 +46,40 @@ async def fetch_data(
 
 async def download_dir(
     client: httpx.AsyncClient,
-    semaphore: asyncio.Semaphore,
+    rate_limiter: RateLimiter,
     tile: tiletanic.Tile,
     tileurl: str,
     output_path: str,
     timeout: int = 5000,
     overwrite: bool = False,
 ):
-    async with semaphore:
-        ext = os.path.splitext(tileurl.split("?")[0])[-1]
+    await rate_limiter.acquire()
+    ext = os.path.splitext(tileurl.split("?")[0])[-1]
 
-        write_dir = os.path.join(output_path, str(tile.z), str(tile.x))
-        write_filepath = os.path.join(write_dir, str(tile.y) + ext)
+    write_dir = os.path.join(output_path, str(tile.z), str(tile.x))
+    write_filepath = os.path.join(write_dir, str(tile.y) + ext)
 
-        if os.path.exists(write_filepath) and not overwrite:
-            return
+    if os.path.exists(write_filepath) and not overwrite:
+        return
 
-        url = (
-            tileurl.replace(r"{x}", str(tile.x))
-            .replace(r"{y}", str(tile.y))
-            .replace(r"{z}", str(tile.z))
-        )
+    url = (
+        tileurl.replace(r"{x}", str(tile.x))
+        .replace(r"{y}", str(tile.y))
+        .replace(r"{z}", str(tile.z))
+    )
 
-        data = await fetch_data(client, url, timeout)
-        if data is None:
-            return
+    data = await fetch_data(client, url, timeout)
+    if data is None:
+        return
 
-        os.makedirs(write_dir, exist_ok=True)
-        with open(write_filepath, mode="wb") as f:
-            f.write(data)
+    os.makedirs(write_dir, exist_ok=True)
+    with open(write_filepath, mode="wb") as f:
+        f.write(data)
 
 
 async def download_mbtiles(
     client: httpx.AsyncClient,
-    semaphore: asyncio.Semaphore,
+    rate_limiter: RateLimiter,
     conn: sqlite3.Connection,
     tile: tiletanic.Tile,
     tileurl: str,
@@ -70,41 +87,41 @@ async def download_mbtiles(
     overwrite: bool = False,
     tms: bool = False,
 ):
-    async with semaphore:
-        if tms:
-            ty = tile.y
-        else:
-            ty = (1 << tile.z) - 1 - tile.y
+    await rate_limiter.acquire()
+    if tms:
+        ty = tile.y
+    else:
+        ty = (1 << tile.z) - 1 - tile.y
 
-        c = conn.cursor()
+    c = conn.cursor()
+    c.execute(
+        "SELECT tile_data FROM tiles WHERE zoom_level = ? AND tile_column = ? AND tile_row = ?",
+        (tile.z, tile.x, ty),
+    )
+    if c.fetchone() is not None and not overwrite:
+        return
+
+    url = (
+        tileurl.replace(r"{x}", str(tile.x))
+        .replace(r"{y}", str(tile.y))
+        .replace(r"{z}", str(tile.z))
+    )
+
+    data = await fetch_data(client, url, timeout)
+    if data is None:
+        return
+
+    if overwrite:
         c.execute(
-            "SELECT tile_data FROM tiles WHERE zoom_level = ? AND tile_column = ? AND tile_row = ?",
+            "DELETE FROM tiles WHERE zoom_level = ? AND tile_column = ? AND tile_row = ?",
             (tile.z, tile.x, ty),
         )
-        if c.fetchone() is not None and not overwrite:
-            return
 
-        url = (
-            tileurl.replace(r"{x}", str(tile.x))
-            .replace(r"{y}", str(tile.y))
-            .replace(r"{z}", str(tile.z))
-        )
-
-        data = await fetch_data(client, url, timeout)
-        if data is None:
-            return
-
-        if overwrite:
-            c.execute(
-                "DELETE FROM tiles WHERE zoom_level = ? AND tile_column = ? AND tile_row = ?",
-                (tile.z, tile.x, ty),
-            )
-
-        c.execute(
-            "INSERT INTO tiles (zoom_level, tile_column, tile_row, tile_data) VALUES (?, ?, ?, ?)",
-            (tile.z, tile.x, ty, data),
-        )
-        conn.commit()
+    c.execute(
+        "INSERT INTO tiles (zoom_level, tile_column, tile_row, tile_data) VALUES (?, ?, ?, ?)",
+        (tile.z, tile.x, ty, data),
+    )
+    conn.commit()
 
 
 def create_mbtiles(output_file: str):
@@ -143,8 +160,7 @@ def create_mbtiles(output_file: str):
 async def run():
     params = parse_arg()
 
-    concurrency = max(1, 1000 // params.interval)
-    semaphore = asyncio.Semaphore(concurrency)
+    rate_limiter = RateLimiter(max(1, params.rps))
 
     conn = None
     if params.mode == "mbtiles":
@@ -191,7 +207,7 @@ async def run():
                 tasks = [
                     download_dir(
                         client,
-                        semaphore,
+                        rate_limiter,
                         tile,
                         params.tileurl,
                         params.output_path,
@@ -205,7 +221,7 @@ async def run():
                 tasks = [
                     download_mbtiles(
                         client,
-                        semaphore,
+                        rate_limiter,
                         conn,
                         tile,
                         params.tileurl,
