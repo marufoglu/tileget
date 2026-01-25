@@ -17,7 +17,7 @@ class RunParams:
     maxzoom: int
     rps: int
     overwrite: bool
-    timeout: int
+    timeout: float
     tms: bool
     retries: int
     retry_delay: float
@@ -56,9 +56,9 @@ def parse_arg() -> RunParams:
     )
     parser.add_argument(
         "--timeout",
-        default=5000,
-        type=int,
-        help="wait response until this value, set as miliseconds in integer, default to 5000",
+        default=5.0,
+        type=float,
+        help="wait response until this value in seconds, default to 5.0",
     )
     parser.add_argument("--tms", help="if set, parse z/x/y as TMS", action="store_true")
     parser.add_argument(
