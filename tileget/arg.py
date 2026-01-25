@@ -13,12 +13,14 @@ class RunParams:
     mode: Literal["dir", "mbtiles"]
     output_path: str
     geometry: shapely.geometry.base.BaseGeometry
-    minzoom: int = 0
-    maxzoom: int = 16
-    interval: int = 1000
-    overwrite: bool = False
-    timeout: int = 5000
-    tms: bool = False
+    minzoom: int
+    maxzoom: int
+    rps: int
+    overwrite: bool
+    timeout: float
+    tms: bool
+    retries: int
+    retry_delay: float
 
 
 def parse_arg() -> RunParams:
@@ -37,22 +39,40 @@ def parse_arg() -> RunParams:
     )
     parser.add_argument("--minzoom", default=0, type=int, help="default to 0")
     parser.add_argument("--maxzoom", default=16, type=int, help="default to 16")
+    def positive_int(value: str) -> int:
+        ivalue = int(value)
+        if ivalue <= 0:
+            raise argparse.ArgumentTypeError("must be a positive integer")
+        return ivalue
+
     parser.add_argument(
-        "--interval",
-        default=500,
-        type=int,
-        help="time taken after each-request, set as miliseconds in interger, default to 500",
+        "--rps",
+        default=1,
+        type=positive_int,
+        help="requests per second, must be positive, default to 1",
     )
     parser.add_argument(
         "--overwrite", help="overwrite existing files", action="store_true"
     )
     parser.add_argument(
         "--timeout",
-        default=5000,
-        type=int,
-        help="wait response until this value, set as miliseconds in integer, default to 5000",
+        default=5.0,
+        type=float,
+        help="wait response until this value in seconds, default to 5.0",
     )
     parser.add_argument("--tms", help="if set, parse z/x/y as TMS", action="store_true")
+    parser.add_argument(
+        "--retries",
+        default=3,
+        type=int,
+        help="max retry count on error, default to 3",
+    )
+    parser.add_argument(
+        "--retry-delay",
+        default=1.0,
+        type=float,
+        help="base delay in seconds for exponential backoff, default to 1.0",
+    )
     args = parser.parse_args()
 
     if args.output_dir is None and args.output_file is None:
@@ -105,10 +125,12 @@ def parse_arg() -> RunParams:
         geometry=geom_3857,
         minzoom=args.minzoom,
         maxzoom=args.maxzoom,
-        interval=args.interval,
+        rps=args.rps,
         overwrite=args.overwrite,
         timeout=args.timeout,
         tms=args.tms,
+        retries=args.retries,
+        retry_delay=args.retry_delay,
     )
 
     return params
