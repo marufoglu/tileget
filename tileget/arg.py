@@ -15,7 +15,7 @@ class RunParams:
     geometry: shapely.geometry.base.BaseGeometry
     minzoom: int = 0
     maxzoom: int = 16
-    rps: int = 2
+    rps: int = 1
     overwrite: bool = False
     timeout: int = 5000
     tms: bool = False
@@ -37,11 +37,17 @@ def parse_arg() -> RunParams:
     )
     parser.add_argument("--minzoom", default=0, type=int, help="default to 0")
     parser.add_argument("--maxzoom", default=16, type=int, help="default to 16")
+    def positive_int(value: str) -> int:
+        ivalue = int(value)
+        if ivalue <= 0:
+            raise argparse.ArgumentTypeError("must be a positive integer")
+        return ivalue
+
     parser.add_argument(
         "--rps",
-        default=2,
-        type=int,
-        help="requests per second, default to 2",
+        default=1,
+        type=positive_int,
+        help="requests per second, must be positive, default to 1",
     )
     parser.add_argument(
         "--overwrite", help="overwrite existing files", action="store_true"

@@ -53,7 +53,6 @@ async def download_dir(
     timeout: int = 5000,
     overwrite: bool = False,
 ):
-    await rate_limiter.acquire()
     ext = os.path.splitext(tileurl.split("?")[0])[-1]
 
     write_dir = os.path.join(output_path, str(tile.z), str(tile.x))
@@ -62,6 +61,7 @@ async def download_dir(
     if os.path.exists(write_filepath) and not overwrite:
         return
 
+    await rate_limiter.acquire()
     url = (
         tileurl.replace(r"{x}", str(tile.x))
         .replace(r"{y}", str(tile.y))
@@ -87,7 +87,6 @@ async def download_mbtiles(
     overwrite: bool = False,
     tms: bool = False,
 ):
-    await rate_limiter.acquire()
     if tms:
         ty = tile.y
     else:
@@ -101,6 +100,7 @@ async def download_mbtiles(
     if c.fetchone() is not None and not overwrite:
         return
 
+    await rate_limiter.acquire()
     url = (
         tileurl.replace(r"{x}", str(tile.x))
         .replace(r"{y}", str(tile.y))
@@ -160,7 +160,7 @@ def create_mbtiles(output_file: str):
 async def run():
     params = parse_arg()
 
-    rate_limiter = RateLimiter(max(1, params.rps))
+    rate_limiter = RateLimiter(params.rps)
 
     conn = None
     if params.mode == "mbtiles":
