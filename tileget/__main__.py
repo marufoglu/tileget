@@ -9,6 +9,10 @@ import tiletanic
 
 from tileget.arg import parse_arg
 
+# ダウンロード速度を計測するためのグローバル変数
+downloaded_count = 0
+start_time = 0.0
+
 
 class RateLimiter:
     def __init__(self, rps: int):
@@ -41,12 +45,16 @@ async def fetch_data(
     retries: int,
     retry_delay: float,
 ) -> bytes | None:
-    print("downloading: " + url)
+    global downloaded_count
 
     for attempt in range(retries + 1):
         try:
             response = await client.get(url, timeout=timeout / 1000)
             response.raise_for_status()
+            downloaded_count += 1
+            elapsed = time.monotonic() - start_time
+            speed = downloaded_count / elapsed if elapsed > 0 else 0
+            print(f"{downloaded_count} tiles ({speed:.1f} tiles/s): {url}")
             return response.content
         except Exception as e:
             if not is_retryable_error(e) or attempt == retries:
@@ -183,7 +191,9 @@ def create_mbtiles(output_file: str):
 
 
 async def run():
+    global start_time
     params = parse_arg()
+    start_time = time.monotonic()
 
     rate_limiter = RateLimiter(params.rps)
 
