@@ -21,6 +21,7 @@ pip install tileget
 usage: tileget [-h] [-e OUTPUT_DIR] [-o OUTPUT_FILE] [--extent EXTENT EXTENT EXTENT EXTENT]
                [--geojson GEOJSON] [--minzoom MINZOOM] [--maxzoom MAXZOOM] [--rps RPS] [--overwrite]
                [--timeout TIMEOUT] [--tms] [--retries RETRIES] [--retry-delay RETRY_DELAY]
+               [--format FORMAT]
                tileurl
 
 xyz-tile download tool
@@ -46,6 +47,7 @@ options:
   --retries RETRIES     max retry count on error, default to 3
   --retry-delay RETRY_DELAY
                         base delay in seconds for exponential backoff, default to 1.0
+  --format FORMAT       tile format for mbtiles metadata (e.g. png, jpg, pbf). used when url has no extension
 ```
 
 ### Examples
