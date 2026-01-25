@@ -13,8 +13,6 @@ Tile download utility - easily download xyz-tile data.
 
 ```sh
 pip install tileget
-# or
-uv pip install tileget
 ```
 
 ## Usage
