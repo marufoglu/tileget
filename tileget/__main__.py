@@ -1,5 +1,6 @@
 import asyncio
 import os
+import random
 import sqlite3
 import time
 
@@ -7,6 +8,9 @@ import httpx
 import tiletanic
 
 from tileget.arg import parse_arg
+
+MAX_RETRIES = 3
+BASE_DELAY = 1.0
 
 
 class RateLimiter:
@@ -25,23 +29,39 @@ class RateLimiter:
             self.last_request_time = time.monotonic()
 
 
+def is_retryable_error(e: Exception) -> bool:
+    if isinstance(e, httpx.TimeoutException):
+        return True
+    if isinstance(e, httpx.HTTPStatusError):
+        return e.response.status_code >= 500 or e.response.status_code == 429
+    return False
+
+
 async def fetch_data(
     client: httpx.AsyncClient, url: str, timeout: int = 5000
 ) -> bytes | None:
     print("downloading: " + url)
-    try:
-        response = await client.get(url, timeout=timeout / 1000)
-        response.raise_for_status()
-        return response.content
-    except httpx.HTTPStatusError as e:
-        print(f"{e.response.status_code}: {url}")
-        return None
-    except httpx.TimeoutException:
-        print(f"timeout: {url}")
-        return None
-    except Exception as e:
-        print(f"{e}: {url}")
-        return None
+
+    for attempt in range(MAX_RETRIES + 1):
+        try:
+            response = await client.get(url, timeout=timeout / 1000)
+            response.raise_for_status()
+            return response.content
+        except Exception as e:
+            if not is_retryable_error(e) or attempt == MAX_RETRIES:
+                if isinstance(e, httpx.HTTPStatusError):
+                    print(f"{e.response.status_code}: {url}")
+                elif isinstance(e, httpx.TimeoutException):
+                    print(f"timeout: {url}")
+                else:
+                    print(f"{e}: {url}")
+                return None
+
+            delay = BASE_DELAY * (2**attempt) + random.uniform(0, 1)
+            print(f"retry {attempt + 1}/{MAX_RETRIES} after {delay:.1f}s: {url}")
+            await asyncio.sleep(delay)
+
+    return None
 
 
 async def download_dir(
