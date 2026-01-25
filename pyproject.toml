@@ -3,14 +3,11 @@ name = "tileget"
 version = "0.4.2"
 description = "Tile download utility - easily download xyz-tile data"
 readme = "README.md"
-requires-python = ">= 3.10"
+requires-python = ">= 3.14"
 dependencies = ["shapely>=2.0.3", "tiletanic>=1.1.0", "pyproj>=3.6.1"]
 
 [dependency-groups]
-dev = [
-    "ruff>=0.3.7",
-    "ty>=0.0.13",
-]
+dev = ["ruff>=0.3.7", "ty>=0.0.13"]
 
 [project.scripts]
 tileget = "tileget.__main__:main"
