@@ -199,13 +199,13 @@ async def run():
 
     async with httpx.AsyncClient() as client:
         for zoom in range(params.minzoom, params.maxzoom + 1):
-            tiles = list(
-                tiletanic.tilecover.cover_geometry(tilescheme, params.geometry, zoom)
+            tiles = tiletanic.tilecover.cover_geometry(
+                tilescheme, params.geometry, zoom
             )
 
-            if params.mode == "dir":
-                tasks = [
-                    download_dir(
+            for tile in tiles:
+                if params.mode == "dir":
+                    await download_dir(
                         client,
                         rate_limiter,
                         tile,
@@ -214,12 +214,9 @@ async def run():
                         params.timeout,
                         params.overwrite,
                     )
-                    for tile in tiles
-                ]
-            else:
-                assert conn is not None
-                tasks = [
-                    download_mbtiles(
+                else:
+                    assert conn is not None
+                    await download_mbtiles(
                         client,
                         rate_limiter,
                         conn,
@@ -229,10 +226,6 @@ async def run():
                         params.overwrite,
                         params.tms,
                     )
-                    for tile in tiles
-                ]
-
-            await asyncio.gather(*tasks)
 
     if conn is not None:
         conn.close()
