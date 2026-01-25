@@ -1,4 +1,5 @@
 import asyncio
+import gzip
 import os
 import random
 import signal
@@ -43,6 +44,20 @@ class RateLimiter:
 
             self.last_request_time = time.monotonic()
             return True
+
+
+def normalize_format(ext: str, default: str | None = None) -> str:
+    """拡張子をMBTiles仕様のformat値に正規化"""
+    ext = ext.lower().lstrip(".")
+    if not ext:
+        if default is None:
+            raise ValueError("format must be specified when url has no extension")
+        return normalize_format(default)
+    if ext in ("jpeg", "jpg"):
+        return "jpg"
+    if ext in ("mvt", "pbf"):
+        return "pbf"
+    return ext
 
 
 def is_retryable_error(e: Exception) -> bool:
@@ -165,6 +180,11 @@ async def download_mbtiles(
     if data is None:
         return
 
+    # MVT(pbf)はgzip圧縮して保存する必要がある
+    ext = os.path.splitext(tileurl.split("?")[0])[-1].lower().lstrip(".")
+    if ext in ("mvt", "pbf") and data[:2] != b"\x1f\x8b":
+        data = gzip.compress(data)
+
     if overwrite:
         c.execute(
             "DELETE FROM tiles WHERE zoom_level = ? AND tile_column = ? AND tile_row = ?",
@@ -184,7 +204,7 @@ def create_mbtiles(output_file: str):
     c.execute(
         """
         CREATE TABLE metadata (
-            name TEXT,
+            name TEXT PRIMARY KEY,
             value TEXT
         )
         """
@@ -232,32 +252,32 @@ async def run():
 
     conn = None
     if params.mode == "mbtiles":
-        if not os.path.exists(params.output_path):
+        is_new = not os.path.exists(params.output_path)
+        if is_new:
             create_mbtiles(params.output_path)
 
         conn = sqlite3.connect(params.output_path, check_same_thread=False)
 
-        c = conn.cursor()
-        c.execute(
-            "INSERT INTO metadata (name, value) VALUES (?, ?)",
-            ("name", os.path.basename(params.output_path)),
-        )
-        c.execute(
-            "INSERT INTO metadata (name, value) VALUES (?, ?)",
-            (
-                "format",
-                os.path.splitext(params.tileurl.split("?")[0])[-1].replace(".", ""),
-            ),
-        )
-        c.execute(
-            "INSERT INTO metadata (name, value) VALUES (?, ?)",
-            ("minzoom", params.minzoom),
-        )
-        c.execute(
-            "INSERT INTO metadata (name, value) VALUES (?, ?)",
-            ("maxzoom", params.maxzoom),
-        )
-        conn.commit()
+        if is_new:
+            ext = os.path.splitext(params.tileurl.split("?")[0])[-1]
+            c = conn.cursor()
+            c.execute(
+                "INSERT INTO metadata (name, value) VALUES (?, ?)",
+                ("name", os.path.basename(params.output_path)),
+            )
+            c.execute(
+                "INSERT INTO metadata (name, value) VALUES (?, ?)",
+                ("format", normalize_format(ext, params.format)),
+            )
+            c.execute(
+                "INSERT INTO metadata (name, value) VALUES (?, ?)",
+                ("minzoom", params.minzoom),
+            )
+            c.execute(
+                "INSERT INTO metadata (name, value) VALUES (?, ?)",
+                ("maxzoom", params.maxzoom),
+            )
+            conn.commit()
 
     tilescheme = (
         tiletanic.tileschemes.WebMercatorBL()
