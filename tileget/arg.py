@@ -19,6 +19,8 @@ class RunParams:
     overwrite: bool = False
     timeout: int = 5000
     tms: bool = False
+    retries: int = 3
+    retry_delay: float = 1.0
 
 
 def parse_arg() -> RunParams:
@@ -59,6 +61,18 @@ def parse_arg() -> RunParams:
         help="wait response until this value, set as miliseconds in integer, default to 5000",
     )
     parser.add_argument("--tms", help="if set, parse z/x/y as TMS", action="store_true")
+    parser.add_argument(
+        "--retries",
+        default=3,
+        type=int,
+        help="max retry count on error, default to 3",
+    )
+    parser.add_argument(
+        "--retry-delay",
+        default=1.0,
+        type=float,
+        help="base delay in seconds for exponential backoff, default to 1.0",
+    )
     args = parser.parse_args()
 
     if args.output_dir is None and args.output_file is None:
@@ -115,6 +129,8 @@ def parse_arg() -> RunParams:
         overwrite=args.overwrite,
         timeout=args.timeout,
         tms=args.tms,
+        retries=args.retries,
+        retry_delay=args.retry_delay,
     )
 
     return params

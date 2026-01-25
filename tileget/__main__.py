@@ -9,9 +9,6 @@ import tiletanic
 
 from tileget.arg import parse_arg
 
-MAX_RETRIES = 3
-BASE_DELAY = 1.0
-
 
 class RateLimiter:
     def __init__(self, rps: int):
@@ -38,17 +35,21 @@ def is_retryable_error(e: Exception) -> bool:
 
 
 async def fetch_data(
-    client: httpx.AsyncClient, url: str, timeout: int = 5000
+    client: httpx.AsyncClient,
+    url: str,
+    timeout: int = 5000,
+    retries: int = 3,
+    retry_delay: float = 1.0,
 ) -> bytes | None:
     print("downloading: " + url)
 
-    for attempt in range(MAX_RETRIES + 1):
+    for attempt in range(retries + 1):
         try:
             response = await client.get(url, timeout=timeout / 1000)
             response.raise_for_status()
             return response.content
         except Exception as e:
-            if not is_retryable_error(e) or attempt == MAX_RETRIES:
+            if not is_retryable_error(e) or attempt == retries:
                 if isinstance(e, httpx.HTTPStatusError):
                     print(f"{e.response.status_code}: {url}")
                 elif isinstance(e, httpx.TimeoutException):
@@ -57,8 +58,8 @@ async def fetch_data(
                     print(f"{e}: {url}")
                 return None
 
-            delay = BASE_DELAY * (2**attempt) + random.uniform(0, 1)
-            print(f"retry {attempt + 1}/{MAX_RETRIES} after {delay:.1f}s: {url}")
+            delay = retry_delay * (2**attempt) + random.uniform(0, 1)
+            print(f"retry {attempt + 1}/{retries} after {delay:.1f}s: {url}")
             await asyncio.sleep(delay)
 
     return None
@@ -72,6 +73,8 @@ async def download_dir(
     output_path: str,
     timeout: int = 5000,
     overwrite: bool = False,
+    retries: int = 3,
+    retry_delay: float = 1.0,
 ):
     ext = os.path.splitext(tileurl.split("?")[0])[-1]
 
@@ -88,7 +91,7 @@ async def download_dir(
         .replace(r"{z}", str(tile.z))
     )
 
-    data = await fetch_data(client, url, timeout)
+    data = await fetch_data(client, url, timeout, retries, retry_delay)
     if data is None:
         return
 
@@ -106,6 +109,8 @@ async def download_mbtiles(
     timeout: int = 5000,
     overwrite: bool = False,
     tms: bool = False,
+    retries: int = 3,
+    retry_delay: float = 1.0,
 ):
     if tms:
         ty = tile.y
@@ -127,7 +132,7 @@ async def download_mbtiles(
         .replace(r"{z}", str(tile.z))
     )
 
-    data = await fetch_data(client, url, timeout)
+    data = await fetch_data(client, url, timeout, retries, retry_delay)
     if data is None:
         return
 
@@ -233,6 +238,8 @@ async def run():
                         params.output_path,
                         params.timeout,
                         params.overwrite,
+                        params.retries,
+                        params.retry_delay,
                     )
                 else:
                     assert conn is not None
@@ -245,6 +252,8 @@ async def run():
                         params.timeout,
                         params.overwrite,
                         params.tms,
+                        params.retries,
+                        params.retry_delay,
                     )
 
     if conn is not None:
