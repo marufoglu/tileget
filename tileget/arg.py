@@ -21,6 +21,7 @@ class RunParams:
     tms: bool
     retries: int
     retry_delay: float
+    format: str | None
 
 
 def parse_arg() -> RunParams:
@@ -72,6 +73,11 @@ def parse_arg() -> RunParams:
         default=1.0,
         type=float,
         help="base delay in seconds for exponential backoff, default to 1.0",
+    )
+    parser.add_argument(
+        "--format",
+        type=str,
+        help="tile format for mbtiles metadata (e.g. png, jpg, pbf). used when url has no extension",
     )
     args = parser.parse_args()
 
@@ -131,6 +137,7 @@ def parse_arg() -> RunParams:
         tms=args.tms,
         retries=args.retries,
         retry_delay=args.retry_delay,
+        format=args.format,
     )
 
     return params
