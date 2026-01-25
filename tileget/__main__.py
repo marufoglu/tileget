@@ -1,4 +1,5 @@
 import asyncio
+import gzip
 import os
 import random
 import signal
@@ -178,6 +179,11 @@ async def download_mbtiles(
     data = await fetch_data(client, url, timeout, retries, retry_delay)
     if data is None:
         return
+
+    # MVT(pbf)はgzip圧縮して保存する必要がある
+    ext = os.path.splitext(tileurl.split("?")[0])[-1].lower().lstrip(".")
+    if ext in ("mvt", "pbf") and data[:2] != b"\x1f\x8b":
+        data = gzip.compress(data)
 
     if overwrite:
         c.execute(
