@@ -115,9 +115,8 @@ async def download_dir(
     overwrite: bool,
     retries: int,
     retry_delay: float,
+    ext: str,
 ):
-    ext = os.path.splitext(tileurl.split("?")[0])[-1]
-
     write_dir = os.path.join(output_path, str(tile.z), str(tile.x))
     write_filepath = os.path.join(write_dir, str(tile.y) + ext)
 
@@ -137,9 +136,12 @@ async def download_dir(
     if data is None:
         return
 
-    os.makedirs(write_dir, exist_ok=True)
-    with open(write_filepath, mode="wb") as f:
-        f.write(data)
+    def _write_file():
+        os.makedirs(write_dir, exist_ok=True)
+        with open(write_filepath, mode="wb") as f:
+            f.write(data)
+
+    await asyncio.to_thread(_write_file)
 
 
 async def download_mbtiles(
@@ -153,6 +155,7 @@ async def download_mbtiles(
     tms: bool,
     retries: int,
     retry_delay: float,
+    ext: str,
 ):
     if tms:
         ty = tile.y
@@ -181,7 +184,6 @@ async def download_mbtiles(
         return
 
     # MVT(pbf)はgzip圧縮して保存する必要がある
-    ext = os.path.splitext(tileurl.split("?")[0])[-1].lower().lstrip(".")
     if ext in ("mvt", "pbf") and data[:2] != b"\x1f\x8b":
         data = gzip.compress(data)
 
@@ -195,7 +197,6 @@ async def download_mbtiles(
         "INSERT INTO tiles (zoom_level, tile_column, tile_row, tile_data) VALUES (?, ?, ?, ?)",
         (tile.z, tile.x, ty, data),
     )
-    conn.commit()
 
 
 def create_mbtiles(output_file: str):
@@ -250,6 +251,9 @@ async def run():
 
     rate_limiter = RateLimiter(params.rps)
 
+    raw_ext = os.path.splitext(params.tileurl.split("?")[0])[-1]
+    norm_ext = raw_ext.lower().lstrip(".")
+
     conn = None
     if params.mode == "mbtiles":
         is_new = not os.path.exists(params.output_path)
@@ -259,7 +263,6 @@ async def run():
         conn = sqlite3.connect(params.output_path, check_same_thread=False)
 
         if is_new:
-            ext = os.path.splitext(params.tileurl.split("?")[0])[-1]
             c = conn.cursor()
             c.execute(
                 "INSERT INTO metadata (name, value) VALUES (?, ?)",
@@ -267,7 +270,7 @@ async def run():
             )
             c.execute(
                 "INSERT INTO metadata (name, value) VALUES (?, ?)",
-                ("format", normalize_format(ext, params.format)),
+                ("format", normalize_format(raw_ext, params.format)),
             )
             c.execute(
                 "INSERT INTO metadata (name, value) VALUES (?, ?)",
@@ -285,6 +288,8 @@ async def run():
         else tiletanic.tileschemes.WebMercator()
     )
 
+    semaphore = asyncio.Semaphore(100)
+
     async with httpx.AsyncClient() as client:
         for zoom in range(params.minzoom, params.maxzoom + 1):
             if shutdown_requested:
@@ -294,43 +299,59 @@ async def run():
                 tilescheme, params.geometry, zoom
             )
 
-            # TaskGroupの代わりに手動でタスクを管理
             pending_tasks: set[asyncio.Task] = set()
 
             for tile in tiles:
                 if shutdown_requested:
                     break
 
+                await semaphore.acquire()
+                if shutdown_requested:
+                    semaphore.release()
+                    break
+
                 if params.mode == "dir":
-                    task = asyncio.create_task(
-                        download_dir(
-                            client,
-                            rate_limiter,
-                            tile,
-                            params.tileurl,
-                            params.output_path,
-                            params.timeout,
-                            params.overwrite,
-                            params.retries,
-                            params.retry_delay,
-                        )
-                    )
+
+                    async def _download_dir(tile=tile):
+                        try:
+                            await download_dir(
+                                client,
+                                rate_limiter,
+                                tile,
+                                params.tileurl,
+                                params.output_path,
+                                params.timeout,
+                                params.overwrite,
+                                params.retries,
+                                params.retry_delay,
+                                raw_ext,
+                            )
+                        finally:
+                            semaphore.release()
+
+                    task = asyncio.create_task(_download_dir())
                 else:
                     assert conn is not None
-                    task = asyncio.create_task(
-                        download_mbtiles(
-                            client,
-                            rate_limiter,
-                            conn,
-                            tile,
-                            params.tileurl,
-                            params.timeout,
-                            params.overwrite,
-                            params.tms,
-                            params.retries,
-                            params.retry_delay,
-                        )
-                    )
+
+                    async def _download_mbtiles(tile=tile):
+                        try:
+                            await download_mbtiles(
+                                client,
+                                rate_limiter,
+                                conn,
+                                tile,
+                                params.tileurl,
+                                params.timeout,
+                                params.overwrite,
+                                params.tms,
+                                params.retries,
+                                params.retry_delay,
+                                norm_ext,
+                            )
+                        finally:
+                            semaphore.release()
+
+                    task = asyncio.create_task(_download_mbtiles())
                 pending_tasks.add(task)
                 task.add_done_callback(pending_tasks.discard)
 
@@ -338,7 +359,11 @@ async def run():
             if pending_tasks:
                 await asyncio.gather(*pending_tasks, return_exceptions=True)
 
+            if conn is not None:
+                conn.commit()
+
     if conn is not None:
+        conn.commit()
         conn.close()
 
     if shutdown_requested:
