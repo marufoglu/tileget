@@ -288,7 +288,7 @@ async def run():
         else tiletanic.tileschemes.WebMercator()
     )
 
-    semaphore = asyncio.Semaphore(100)
+    semaphore = asyncio.Semaphore(max(1000, params.rps * 20))
 
     async with httpx.AsyncClient() as client:
         for zoom in range(params.minzoom, params.maxzoom + 1):
