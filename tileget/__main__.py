@@ -4,6 +4,7 @@ import os
 import random
 import signal
 import sqlite3
+import sys
 import time
 
 import httpx
@@ -237,17 +238,18 @@ async def run():
     params = parse_arg()
     start_time = time.monotonic()
 
-    # SIGINTハンドラを設定
-    loop = asyncio.get_running_loop()
-
-    def handle_sigint():
+    def handle_sigint(*_args):
         global shutdown_requested
         if not shutdown_requested:
             shutdown_requested = True
             print("\nShutdown requested. Waiting for running tasks to complete...")
 
-    loop.add_signal_handler(signal.SIGINT, handle_sigint)
-    loop.add_signal_handler(signal.SIGTERM, handle_sigint)
+    if sys.platform == "win32":
+        signal.signal(signal.SIGINT, handle_sigint)
+    else:
+        loop = asyncio.get_running_loop()
+        loop.add_signal_handler(signal.SIGINT, handle_sigint)
+        loop.add_signal_handler(signal.SIGTERM, handle_sigint)
 
     rate_limiter = RateLimiter(params.rps)
 
